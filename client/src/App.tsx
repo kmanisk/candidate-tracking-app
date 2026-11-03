@@ -2,11 +2,13 @@ import { useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
 import {
   ArrowDownRight, ArrowRight, ArrowUpRight, BriefcaseBusiness, CalendarDays,
-  Check, ChevronLeft, ChevronRight, Clock3, Download, RefreshCw, SearchCheck, ShieldAlert,
-  FilterX, KanbanSquare, LayoutDashboard, Mail, MapPin, Menu,
-  Pencil, Plus, Search, SlidersHorizontal, Trash2, UsersRound, X,
+  Check, ChevronDown, ChevronLeft, ChevronRight, Clock3, Download, RefreshCw, SearchCheck, ShieldAlert,
+  FilterX, KanbanSquare, LayoutDashboard, LogOut, Mail, MapPin, Menu,
+  Pencil, Plus, Search, Settings2, SlidersHorizontal, Trash2, UsersRound, X,
 } from 'lucide-react';
-import { api } from './api';
+import { api, setCsrfToken } from './api';
+import type { AuthStatus, AuthSuccess, AuthUser } from './api';
+import { AuthScreen, PasswordDialog } from './Auth';
 import { STAGES } from './types';
 import type { Candidate, CandidateInput, Page, Stage, Stats, View } from './types';
 import { candidateForm, emptyForm, formatDate, initials, shortDate, stageClass } from './utils';
@@ -134,9 +136,12 @@ function ProfileDrawer({
   );
 }
 
-export default function App() {
+function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => Promise<void> }) {
   const [view, setView] = useState<View>('overview');
   const [mobileNav, setMobileNav] = useState(false);
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const [securityOpen, setSecurityOpen] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
   const [stats, setStats] = useState<Stats | null>(null);
   const [page, setPage] = useState<Page>(EMPTY_PAGE);
   const [board, setBoard] = useState<Candidate[]>([]);
@@ -292,7 +297,8 @@ export default function App() {
   }
   function openCreate() { setEditing(null); setModalOpen(true); }
   function openEdit(candidate: Candidate) { setEditing(candidate); setModalOpen(true); }
-  function navigate(next: View) { setView(next); setMobileNav(false); setError(''); }
+  function navigate(next: View) { setView(next); setMobileNav(false); setAccountMenuOpen(false); setError(''); }
+  async function signOut() { if (signingOut) return; setSigningOut(true); try { await onLogout(); } catch (err) { setError(err instanceof Error ? err.message : 'Could not sign out.'); } finally { setSigningOut(false); } }
   async function openProfile(candidate: Candidate) {
     setSelected(candidate);
     try { setSelected(await api.get(candidate.id)); } catch (err) { setError((err as Error).message); }
@@ -343,6 +349,20 @@ export default function App() {
   }
   function table(items: Candidate[]) {
     return <div className="table-scroll">
+      {items.length > 0 && <div className="mobile-candidate-list">
+        {items.map(candidate => <button key={candidate.id} className="mobile-candidate-card" onClick={() => void openProfile(candidate)}>
+          <div className="mobile-candidate-primary">
+            <Avatar name={candidate.name} />
+            <span><strong>{candidate.name}</strong><small>{candidate.role}</small></span>
+            <ArrowUpRight size={17} />
+          </div>
+          <div className="mobile-candidate-secondary">
+            <StageBadge stage={candidate.stage} />
+            <span className="mobile-candidate-date">{shortDate(candidate.updatedAt)}</span>
+          </div>
+          {candidate.skills.length > 0 && <div className="skill-list">{candidate.skills.slice(0, 3).map(skill => <span className="skill" key={skill}>{skill}</span>)}</div>}
+        </button>)}
+      </div>}
       {items.length > 0 && <table className="candidate-table">
         <thead><tr><th>Candidate</th><th>Position</th><th>Stage</th><th>Skills</th><th>Applied</th><th aria-label="Actions" /></tr></thead>
         <tbody>{renderRows(items)}</tbody>
@@ -365,13 +385,14 @@ export default function App() {
         <div className="brand"><span className="brand-mark"><span>H</span></span><span className="brand-name">hireline<span className="brand-dot">.</span><small>RECRUITMENT OS</small></span></div>
         <div className="nav-label">WORKSPACE</div>
         <nav aria-label="Main navigation">{VIEWS.map(item => <button key={item.id} className={'nav-link' + (view === item.id ? ' nav-active' : '')} onClick={() => navigate(item.id)}><item.icon size={18} /><span>{item.label}</span>{item.id === 'candidates' && <span className="nav-count">{stats?.total ?? '—'}</span>}</button>)}</nav>
-        <div className="sidebar-bottom"><button className="sidebar-create" onClick={openCreate}><Plus size={17} /> New application <ArrowRight size={16} /></button><div className="sidebar-caption"><span>HIRELINE / ATS</span><span>v1.1</span></div></div>
+        <div className="sidebar-bottom"><button className="sidebar-create" onClick={openCreate}><Plus size={17} /> New application <ArrowRight size={16} /></button><div className="sidebar-caption"><span>HIRELINE / ATS</span><span>v2.0</span></div></div>
       </aside>
 
       <div className="main-panel">
         <header className="topbar">
           <div className="topbar-left">
             <button className="icon-button mobile-menu" aria-label="Open navigation" onClick={() => setMobileNav(!mobileNav)}><Menu size={21} /></button>
+            <span className="mobile-topbar-brand">hireline<span>.</span></span>
             <span className="breadcrumbs">Workspace <ChevronRight size={14} /> <strong>{view === 'overview' ? 'Overview' : view === 'candidates' ? 'Candidates' : 'Pipeline'}</strong></span>
           </div>
           <div className="topbar-right">
@@ -382,6 +403,18 @@ export default function App() {
             <button className="icon-button refresh-button" aria-label="Refresh application data" title="Refresh application data" onClick={refresh}>
               <RefreshCw size={17} className={connection === 'checking' ? 'refreshing' : ''} />
             </button>
+            <div className="account-dropdown-anchor">
+              <button className="account-trigger" onClick={() => setAccountMenuOpen(!accountMenuOpen)} aria-label="Account menu" aria-expanded={accountMenuOpen}>
+                <span className="account-trigger-avatar">{initials(user.displayName)}</span>
+                <span className="account-trigger-info"><strong>{user.displayName}</strong><small>Workspace owner</small></span>
+                <ChevronDown size={14} />
+              </button>
+              {accountMenuOpen && <div className="account-dropdown">
+                <div className="account-dropdown-header"><strong>{user.displayName}</strong><small>@{user.username}</small></div>
+                <button onClick={() => { setSecurityOpen(true); setAccountMenuOpen(false); }}><Settings2 size={17} /> Change password</button>
+                <button onClick={() => void signOut()} disabled={signingOut}><LogOut size={17} /> {signingOut ? 'Signing out…' : 'Sign out'}</button>
+              </div>}
+            </div>
           </div>
         </header>
         <main className="content">
@@ -412,10 +445,17 @@ export default function App() {
           {view === 'candidates' && <section className="surface directory"><div className="directory-toolbar"><div><div className="eyebrow">CANDIDATE DATABASE</div><h2>All applications <span className="count-label">{page.total}</span></h2></div><button className="button button-outline export-button" onClick={() => void exportCsv()} disabled={exporting || loading || connection !== 'online' || page.total === 0}><Download size={16} /> {exporting ? 'Exporting…' : 'Export CSV'}</button></div><div className="filters"><label className="search-field"><Search size={17} /><input aria-label="Search candidates" placeholder="Search name, email, role or skill…" value={search} onChange={e => setSearch(e.target.value)} /></label><label className="filter-select"><SlidersHorizontal size={16} /><select aria-label="Filter by stage" value={stage} onChange={e => setStage(e.target.value)}><option value="">All stages</option>{STAGES.map(s => <option key={s}>{s}</option>)}</select></label><label className="filter-select"><BriefcaseBusiness size={16} /><select aria-label="Filter by role" value={role} onChange={e => setRole(e.target.value)}><option value="">All roles</option>{stats?.roles.map(r => <option key={r}>{r}</option>)}</select></label><label className="filter-skill"><input aria-label="Filter by skill" placeholder="Skill..." value={skill} onChange={e => setSkill(e.target.value)} /></label>{(search || stage || role || skill) && <button className="button button-reset" onClick={() => { setSearch(''); setStage(''); setRole(''); setSkill(''); }}><FilterX size={15} /> Reset</button>}</div>{loading ? <div className="loading-state">Loading candidates…</div> : table(connection === 'offline' ? [] : page.items)}<div className="pagination"><span>Showing {page.total ? (page.page - 1) * page.limit + 1 : 0}–{Math.min(page.page * page.limit, page.total)} of {page.total} applicants</span><div><button className="icon-button" aria-label="Previous page" disabled={pageNumber <= 1} onClick={() => setPageNumber(p => p - 1)}><ChevronLeft size={18} /></button><span>Page {page.page} of {page.pages}</span><button className="icon-button" aria-label="Next page" disabled={pageNumber >= page.pages} onClick={() => setPageNumber(p => p + 1)}><ChevronRight size={18} /></button></div></div></section>}
 
           {view === 'pipeline' && <><div className="board-toolbar"><div className="board-hint"><KanbanSquare size={18} /> Drag cards or use the stage selector to move candidates</div><span>{connection === 'offline' ? 'Data unavailable' : board.length + ' candidates in pipeline'}</span></div>{connection === 'offline' ? <div className="surface board-unavailable"><ShieldAlert size={27} /><h3>Pipeline unavailable</h3><p>Reconnect MongoDB to load the hiring stages.</p><button className="button button-primary" onClick={refresh}><RefreshCw size={16} /> Retry connection</button></div> : boardLoading ? <div className="loading-state">Loading pipeline…</div> : <div className="board">{STAGES.map(s => <section className="board-column" key={s} onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); const moving = board.find(c => c.id === draggedId); if (moving) void changeStage(moving, s).catch(err => setError(err.message)); setDraggedId(''); }}><div className="column-heading"><span className={'stage-key ' + stageClass(s)} /><h3>{s}</h3><span>{board.filter(c => c.stage === s).length}</span></div><div className="board-cards">{board.filter(c => c.stage === s).map(c => <article key={c.id} className={'board-card' + (draggedId === c.id ? ' dragging' : '')} draggable onDragStart={() => setDraggedId(c.id)} onDragEnd={() => setDraggedId('')}><button className="board-person" onClick={() => void openProfile(c)}><Avatar name={c.name} /><span><strong>{c.name}</strong><small>{c.role}</small></span><ArrowUpRight size={15} /></button><div className="board-skills">{c.skills.slice(0, 2).map(skill => <span className="skill" key={skill}>{skill}</span>)}</div><div className="board-card-bottom"><span><Clock3 size={13} /> {shortDate(c.updatedAt)}</span><select aria-label={'Move ' + c.name + ' to stage'} value={c.stage} onChange={e => void changeStage(c, e.target.value as Stage).catch(err => setError(err.message))}>{STAGES.map(option => <option key={option}>{option}</option>)}</select></div></article>)}{board.filter(c => c.stage === s).length === 0 && <div className="empty-column">Drop candidates here</div>}</div></section>)}</div>}</>}
-          <footer className="footer"><span>HIRELINE / APPLICANT TRACKING</span><span>Public workspace · No sign-in · Use test records only</span></footer>
+          <footer className="footer"><span>HIRELINE / APPLICANT TRACKING</span><span>Private workspace · Signed in as @{user.username}</span></footer>
         </main>
       </div>
+      <nav className="mobile-bottom-nav" aria-label="Mobile navigation">
+        {VIEWS.map(item => <button key={item.id} className={view === item.id ? 'bottom-active' : ''} onClick={() => navigate(item.id)}>
+          <item.icon size={20} /><span>{item.id === 'pipeline' ? 'Pipeline' : item.label}</span>
+        </button>)}
+        <button className="bottom-create" onClick={openCreate}><Plus size={20} /><span>New</span></button>
+      </nav>
       {mobileNav && <button className="mobile-scrim" aria-label="Close navigation" onClick={() => setMobileNav(false)} />}
+      {securityOpen && <PasswordDialog user={user} onClose={() => setSecurityOpen(false)} />}
       {selected && <ProfileDrawer key={selected.id} candidate={selected} onClose={() => setSelected(null)} onEdit={openEdit} onStage={changeStage} onNote={addNote} onDelete={candidate => setPendingDelete(candidate)} />}
       {pendingDelete && <div className="overlay" role="presentation">
         <section className="confirm-dialog" role="alertdialog" aria-modal="true" aria-label="Confirm candidate deletion" aria-describedby="delete-description">
@@ -431,4 +471,54 @@ export default function App() {
       {modalOpen && <CandidateFormModal key={editing?.id || 'new'} editing={editing} onClose={() => { setModalOpen(false); setEditing(null); }} onSave={saveCandidate} />}
     </div>
   );
+}
+
+
+export default function App() {
+  const [auth, setAuth] = useState<AuthStatus | null>(null);
+  const [startupError, setStartupError] = useState('');
+  const [retry, setRetry] = useState(0);
+
+  useEffect(() => {
+    let current = true;
+    api.authStatus()
+      .then(status => {
+        if (!current) return;
+        setCsrfToken(status.authenticated ? status.csrfToken : '');
+        setAuth(status);
+        setStartupError('');
+      })
+      .catch(error => {
+        if (current) setStartupError(error instanceof Error ? error.message : 'Unable to connect to Hireline.');
+      });
+    return () => { current = false; };
+  }, [retry]);
+
+  useEffect(() => {
+    const expire = () => {
+      setCsrfToken('');
+      setAuth({ authenticated: false, setupRequired: false, setupAvailable: false });
+    };
+    window.addEventListener('hireline:session-expired', expire);
+    return () => window.removeEventListener('hireline:session-expired', expire);
+  }, []);
+
+  function authenticated(result: AuthSuccess) {
+    setCsrfToken(result.csrfToken);
+    setAuth({ authenticated: true, setupRequired: false, ...result });
+  }
+
+  async function logout() {
+    await api.logout();
+    setCsrfToken('');
+    setAuth({ authenticated: false, setupRequired: false, setupAvailable: false });
+  }
+
+  if (startupError) return <div className="startup-state">
+    <div className="startup-logo">H</div><h2>Unable to reach Hireline</h2>
+    <p>{startupError}</p><button className="button button-primary" onClick={() => { setStartupError(''); setRetry(v => v + 1); }}>Try again</button>
+  </div>;
+  if (!auth) return <div className="startup-state"><div className="startup-logo">H</div><p>Opening your workspace…</p></div>;
+  if (!auth.authenticated) return <AuthScreen status={auth} onAuthenticated={authenticated} />;
+  return <Dashboard user={auth.user} onLogout={logout} />;
 }

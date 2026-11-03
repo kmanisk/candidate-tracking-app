@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { Candidate, STAGES, toCandidate } from './model.js';
 import { candidateInput, candidatePatch, stageInput, noteInput, pageInput, limitInput } from './validation.js';
+import { configureAuth } from './auth.js';
 
 export const app = express();
 app.set('trust proxy', 1);
@@ -27,6 +28,7 @@ app.use(helmet({
 app.use(express.json({ limit: '24kb' }));
 app.use(cors({ origin: process.env.CORS_ORIGIN?.split(',') || false }));
 app.use('/api', rateLimit({ windowMs: 15 * 60 * 1000, limit: 300, standardHeaders: 'draft-8', legacyHeaders: false }));
+app.use('/api', (_req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
 
 const asyncRoute = handler => (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next);
 const invalid = (res, result) => res.status(400).json({ error: 'Validation failed', details: result.error.issues.map(i => ({ path: i.path.join('.'), message: i.message })) });
@@ -43,6 +45,8 @@ app.use('/api', (_req, res, next) => {
   }
   next();
 });
+
+configureAuth(app);
 
 app.get('/api/interviews/upcoming', asyncRoute(async (_req, res) => {
   const now = new Date();

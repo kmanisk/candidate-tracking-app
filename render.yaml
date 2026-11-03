@@ -13,3 +13,5 @@ services:
         value: production
       - key: MONGODB_URI
         sync: false
+      - key: HIRELINE_SETUP_TOKEN
+        sync: false
