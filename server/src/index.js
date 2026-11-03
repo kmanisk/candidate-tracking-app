@@ -1,7 +1,6 @@
 import './config.js';
 import mongoose from 'mongoose';
 import { app } from './app.js';
-import { seedIfEmpty } from './seed.js';
 
 const port = Number(process.env.PORT) || 4000;
 const server = app.listen(port, '0.0.0.0', () => {
@@ -18,7 +17,6 @@ async function connectDatabase() {
       dbName: 'hireline',
     });
     console.log('Connected to MongoDB Atlas');
-    await seedIfEmpty();
   } catch (error) {
     console.error('MongoDB temporarily unavailable: ' + error.message);
     if (stopping) return;

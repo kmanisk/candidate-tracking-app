@@ -2,7 +2,11 @@
 
 A working full-stack Applicant Tracking System (ATS) built for a portfolio and technical interviews. Recruiters can manage applications from first contact through selection, with every change stored in MongoDB.
 
-> **Public portfolio demo.** All preloaded records are fictional. This demo intentionally has no login: anyone with the URL can create, edit, and delete records. Do not store real applicant information in it.
+> **Public application with no authentication.** Anyone with the URL can view, create, edit, and delete records. Use synthetic candidate data only; do not enter real personal information until authentication and access controls are implemented.
+
+## Live website
+
+https://hireline-ats-kmanisk.onrender.com
 
 ## Features
 
@@ -14,7 +18,7 @@ A working full-stack Applicant Tracking System (ATS) built for a portfolio and t
 - Move applicants using drag-and-drop or accessible stage selectors
 - Candidate profiles, contact details, skills, interview date, notes, and change history
 - Responsive interface and keyboard-visible focus states
-- Seed command for **fictional** example data; never silently overwrites existing data
+- Optional seed command for fictional example data; never prepopulates production automatically or overwrites existing data
 - Input validation, bounded requests, security headers, error handling, health endpoint, tests, and CI
 
 ## Stack
@@ -35,7 +39,7 @@ cd candidate-tracking-app
 npm ci
 cp .env.example .env
 # Edit .env and set MONGODB_URI (do not commit it)
-npm run seed:if-empty
+npm run seed  # optional, inserts fictional sample records if database is empty
 npm run dev
 ```
 
@@ -91,7 +95,7 @@ The project is designed as a **single Node service**: one URL serves the React b
 
 - Connect this GitHub repository to Render as a Node web service (free plan is enough for a demo).
 - Build: `npm ci --include=dev && npm run build`
-- Start: `npm run seed:if-empty && npm start`
+- Start: `npm start`
 - Set `MONGODB_URI` as a **secret environment variable** and `NODE_ENV=production`.
 - Health check: `/api/health`.
 - Never place MongoDB passwords in Git, README, client files, or screenshots.
@@ -100,7 +104,7 @@ A `render.yaml` blueprint is provided for reproducibility.
 
 ## Known scope limits
 
-This is intentionally an unauthenticated **portfolio demonstration**, not a production HR product. It does not include recruiter accounts, permissions, email invitations, file uploads, automated email, audit identities, or personal-data governance. Add authentication and proper organization-level authorization before handling real candidate data.
+This publicly accessible applicant tracking application is **not yet suitable for real candidate data** because it has no authentication or role-based authorization. It does not include recruiter accounts, permissions, email invitations, file uploads, automated email, audit identities, or personal-data governance. Add authentication and proper organization-level authorization before handling real candidate data.
 
 ## Project documentation
 

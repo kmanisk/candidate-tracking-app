@@ -22,7 +22,7 @@ Candidates: name, email, optional phone, role, stage, skills[], experience years
 
 Uniqueness: lowercase email + role. Treat duplicate key as HTTP 409.
 
-No real personal information: seeded entries are fictional with example.com emails.
+No real personal information: optional seed entries are fictional with example.com emails; seeding is disabled in the default production startup.
 
 ## API contract
 

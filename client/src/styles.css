@@ -36,18 +36,14 @@ button, select { -webkit-tap-highlight-color: transparent; }
 .workspace-card strong, .workspace-card small { display: block; }
 .workspace-card strong { font-size: 12px; }
 .workspace-card small { margin-top: 3px; font-size: 11px; color: #a0b8af; }
-.workspace-card > svg { color: #91aca1; }
 .sidebar-caption { display: flex; align-items: center; color: #8ca69a; padding: 20px 6px 0; font: 600 9px ui-monospace, monospace; letter-spacing: 1px; gap: 8px; }
 .sidebar-caption span:last-child { margin-left: auto; }
-.online-dot, .demo-tag span { display: inline-block; background: #79cda2; width: 6px; height: 6px; border-radius: 50%; }
 .main-panel { min-width: 0; flex: 1; }
 .topbar { height: 76px; display: flex; justify-content: space-between; align-items: center; background: #fff; border-bottom: 1px solid #e5ebe7; padding: 0 43px; }
 .topbar-left, .topbar-right, .breadcrumbs, .account { display: flex; align-items: center; }
 .breadcrumbs { gap: 10px; color: #8c9c95; font-size: 12px; }
 .breadcrumbs strong { color: #30443b; font-weight: 650; }
 .topbar-right { gap: 24px; }
-.demo-tag { font: 700 10px ui-monospace, monospace; letter-spacing: 1.2px; display: flex; align-items: center; gap: 9px; color: #56816e; }
-.topbar-divider { width: 1px; height: 26px; background: #e4e9e6; }
 .account { gap: 9px; color: #3a4c44; font-size: 12px; font-weight: 650; }
 .account-avatar { width: 29px; height: 29px; background: #e5ede5; color: #365b4b; display: grid; place-items: center; font-size: 10px; border-radius: 4px; font-weight: 800; }
 .content { max-width: 1640px; margin: 0 auto; padding: 41px 44px 30px; }
@@ -255,8 +251,7 @@ button, select { -webkit-tap-highlight-color: transparent; }
 }
 @media (max-width: 580px) {
   .topbar-right { gap: 12px; }
-  .topbar-right .account > span:nth-child(2), .topbar-right .account > svg, .topbar-divider { display: none; }
-  .demo-tag { font-size: 9px; }
+  .topbar-right .account > span:nth-child(2) { display: none; }
   .page-heading { align-items: flex-start; flex-direction: column; }
   .page-heading h1 { font-size: 27px; }
   .add-button { width: 100%; }

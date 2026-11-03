@@ -26,7 +26,7 @@ const data = [
 export async function seedIfEmpty() {
   const count = await Candidate.countDocuments();
   if (count) {
-    console.log('Existing records found; demo seed skipped.');
+    console.log('Existing records found; sample data seeding skipped.');
     return 0;
   }
   const records = data.map(([name, role, skills, stage, location, experience], i) => {
@@ -40,7 +40,7 @@ export async function seedIfEmpty() {
         { to: 'Applied', at: new Date(Date.now() - 7 * 86400000) },
         ...(stage !== 'Applied' ? [{ from: 'Applied', to: stage, at: new Date() }] : []),
       ],
-      notes: i % 4 === 0 ? [{ text: 'Demo recruiter note — sample data only.' }] : [],
+      notes: i % 4 === 0 ? [{ text: 'Example interview feedback for this applicant.' }] : [],
       createdAt: new Date(Date.now() - (i + 1) * 86400000),
     };
   });
@@ -51,8 +51,10 @@ export async function seedIfEmpty() {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const optional = process.argv.includes('--if-empty');
-  if (!process.env.MONGODB_URI) {
-    console.error('MONGODB_URI not set. ' + (optional ? 'Optional demo seed skipped.' : 'Configure it in .env.'));
+  if (optional && process.env.HIRELINE_SEED_ON_START !== 'true') {
+    console.log('Automatic sample data seeding disabled.');
+  } else if (!process.env.MONGODB_URI) {
+    console.error('MONGODB_URI not set. ' + (optional ? 'Optional seed skipped.' : 'Configure it in .env.'));
     if (!optional) process.exitCode = 1;
   } else {
     try {
@@ -62,7 +64,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       });
       await seedIfEmpty();
     } catch (error) {
-      console.error('Demo seed failed: ' + error.message);
+      console.error('Sample data seeding failed: ' + error.message);
       if (!optional) process.exitCode = 1;
     } finally {
       await mongoose.disconnect();
