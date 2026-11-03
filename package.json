@@ -1,0 +1,18 @@
+{
+  "name": "candidate-tracking-app",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "workspaces": ["client", "server"],
+  "scripts": {
+    "dev": "concurrently -k \"npm run dev -w server\" \"npm run dev -w client\"",
+    "build": "npm run build -w client",
+    "start": "npm run start -w server",
+    "seed": "npm run seed -w server",
+    "seed:if-empty": "npm run seed:if-empty -w server",
+    "test": "npm test -w server",
+    "check": "npm test && npm run build"
+  },
+  "devDependencies": { "concurrently": "^9.2.1" },
+  "engines": { "node": ">=22" }
+}

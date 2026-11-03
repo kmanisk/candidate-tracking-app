@@ -1,0 +1,23 @@
+{
+  "name": "@hireline/server",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "node --watch src/index.js",
+    "start": "node src/index.js",
+    "seed": "node src/seed.js",
+    "seed:if-empty": "node src/seed.js --if-empty",
+    "test": "node --test tests/*.test.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.0",
+    "express": "^5.1.0",
+    "express-rate-limit": "^8.0.0",
+    "helmet": "^8.1.0",
+    "mongoose": "^8.18.0",
+    "zod": "^4.1.0"
+  },
+  "devDependencies": { "supertest": "^7.1.0" }
+}
