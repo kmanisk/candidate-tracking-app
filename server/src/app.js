@@ -36,6 +36,24 @@ app.get('/api/health', (_req, res) => res.status(mongoose.connection.readyState 
   status: mongoose.connection.readyState === 1 ? 'ok' : 'database unavailable',
 }));
 
+// Report disconnected database immediately instead of waiting for Mongoose's query timeout.
+app.use('/api', (_req, res, next) => {
+  if (mongoose.connection.readyState !== 1) {
+    return res.status(503).json({ error: 'Database unavailable. Check the MongoDB connection and retry.' });
+  }
+  next();
+});
+
+app.get('/api/interviews/upcoming', asyncRoute(async (_req, res) => {
+  const now = new Date();
+  const end = new Date(now.getTime() + 7 * 86400000);
+  const docs = await Candidate.find({
+    stage: 'Interview',
+    interviewAt: { $gte: now, $lte: end },
+  }).sort({ interviewAt: 1, _id: 1 }).limit(6).lean();
+  res.json({ items: docs.map(toCandidate) });
+}));
+
 app.get('/api/stats', asyncRoute(async (_req, res) => {
   const [total, byStage, upcoming, latest, roles] = await Promise.all([
     Candidate.countDocuments(),

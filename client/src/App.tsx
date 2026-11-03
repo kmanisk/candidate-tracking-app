@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
 import {
   ArrowDownRight, ArrowRight, ArrowUpRight, BriefcaseBusiness, CalendarDays,
-  Check, ChevronLeft, ChevronRight, CircleHelp, Clock3,
+  Check, ChevronLeft, ChevronRight, Clock3, Download, RefreshCw, SearchCheck, ShieldAlert,
   FilterX, KanbanSquare, LayoutDashboard, Mail, MapPin, Menu,
   Pencil, Plus, Search, SlidersHorizontal, Trash2, UsersRound, X,
 } from 'lucide-react';
@@ -95,7 +95,7 @@ function ProfileDrawer({
   candidate: Candidate;
   onClose: () => void;
   onEdit: (candidate: Candidate) => void;
-  onDelete: (candidate: Candidate) => Promise<void>;
+  onDelete: (candidate: Candidate) => void;
   onStage: (candidate: Candidate, stage: Stage) => Promise<void>;
   onNote: (candidate: Candidate, note: string) => Promise<void>;
 }) {
@@ -140,6 +140,7 @@ export default function App() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [page, setPage] = useState<Page>(EMPTY_PAGE);
   const [board, setBoard] = useState<Candidate[]>([]);
+  const [upcoming, setUpcoming] = useState<Candidate[]>([]);
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [stage, setStage] = useState('');
@@ -147,6 +148,8 @@ export default function App() {
   const [skill, setSkill] = useState('');
   const [pageNumber, setPageNumber] = useState(1);
   const [loading, setLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [connection, setConnection] = useState<'checking' | 'online' | 'offline'>('checking');
   const [boardLoading, setBoardLoading] = useState(false);
   const [error, setError] = useState('');
   const [revision, setRevision] = useState(0);
@@ -154,6 +157,8 @@ export default function App() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Candidate | null>(null);
   const [draggedId, setDraggedId] = useState('');
+  const [pendingDelete, setPendingDelete] = useState<Candidate | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const counts = stats?.byStage || EMPTY_COUNTS;
 
   useEffect(() => {
@@ -165,9 +170,29 @@ export default function App() {
 
   useEffect(() => {
     let active = true;
-    api.stats().then(data => { if (active) setStats(data); }).catch(err => { if (active) setError(err.message); });
+    api.health()
+      .then(() => { if (active) setConnection('online'); })
+      .catch(() => { if (active) setConnection('offline'); });
+    api.stats()
+      .then(data => { if (active) { setStats(data); setError(''); } })
+      .catch(err => { if (active) { setStats(null); setError(err.message); } });
+    api.upcoming()
+      .then(data => { if (active) setUpcoming(data.items); })
+      .catch(() => { if (active) setUpcoming([]); });
     return () => { active = false; };
   }, [revision]);
+
+  useEffect(() => {
+    function onEscape(event: KeyboardEvent) {
+      if (event.key !== 'Escape') return;
+      if (pendingDelete) setPendingDelete(null);
+      else if (modalOpen) { setModalOpen(false); setEditing(null); }
+      else if (selected) setSelected(null);
+      else setMobileNav(false);
+    }
+    document.addEventListener('keydown', onEscape);
+    return () => document.removeEventListener('keydown', onEscape);
+  }, [pendingDelete, modalOpen, selected]);
 
   useEffect(() => {
     if (view !== 'candidates') return;
@@ -207,6 +232,64 @@ export default function App() {
   const recent = useMemo(() => stats?.latest || [], [stats]);
 
   function updated() { setRevision(current => current + 1); }
+  function refresh() {
+    setConnection('checking');
+    setError('');
+    updated();
+  }
+  function viewStage(next: Stage | '') {
+    setStage(next);
+    setRole('');
+    setSkill('');
+    setSearch('');
+    setView('candidates');
+    setError('');
+  }
+  async function exportCsv() {
+    if (exporting) return;
+    if (page.total > 2500) { setError('Export is limited to 2,500 matching candidates at a time. Narrow your filters first.'); return; }
+    setExporting(true);
+    setError('');
+    try {
+      const params = new URLSearchParams({ limit: '50' });
+      if (debouncedSearch) params.set('search', debouncedSearch);
+      if (stage) params.set('stage', stage);
+      if (role) params.set('role', role);
+      if (skill.trim()) params.set('skill', skill.trim());
+      const records: Candidate[] = [];
+      for (let currentPage = 1; currentPage <= 50; currentPage++) {
+        params.set('page', String(currentPage));
+        const response = await api.list(params);
+        records.push(...response.items);
+        if (currentPage >= response.pages) break;
+      }
+      if (records.length === 0) { setError('There are no candidates matching the current filters.'); return; }
+      const protect = (value: string | number) => {
+        const text = String(value ?? '');
+        const safe = /^[\s]*[=+@-]/.test(text) ? "'" + text : text;
+        return '"' + safe.replaceAll('"', '""') + '"';
+      };
+      const rows = [
+        ['Name', 'Email', 'Phone', 'Position', 'Stage', 'Skills', 'Experience', 'Location', 'Source', 'Interview date', 'Applied date'],
+        ...records.map(candidate => [
+          candidate.name, candidate.email, candidate.phone, candidate.role,
+          candidate.stage, candidate.skills.join('; '), String(candidate.experience),
+          candidate.location, candidate.source, candidate.interviewAt || '', candidate.createdAt,
+        ]),
+      ];
+      const csv = rows.map(columns => columns.map(protect).join(',')).join('\r\n');
+      const url = URL.createObjectURL(new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' }));
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = 'hireline-candidates-' + new Date().toISOString().slice(0, 10) + '.csv';
+      anchor.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not export candidates.');
+    } finally {
+      setExporting(false);
+    }
+  }
   function openCreate() { setEditing(null); setModalOpen(true); }
   function openEdit(candidate: Candidate) { setEditing(candidate); setModalOpen(true); }
   function navigate(next: View) { setView(next); setMobileNav(false); setError(''); }
@@ -232,12 +315,18 @@ export default function App() {
     updated();
   }
   async function removeCandidate(candidate: Candidate) {
-    if (!window.confirm('Delete ' + candidate.name + '? This cannot be undone.')) return;
+    setDeleting(true);
     try {
       await api.remove(candidate.id);
       setSelected(null);
+      setPendingDelete(null);
       updated();
-    } catch (err) { setError((err as Error).message); }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not delete candidate.');
+      setPendingDelete(null);
+    } finally {
+      setDeleting(false);
+    }
   }
 
   function renderRows(items: Candidate[]) {
@@ -253,7 +342,21 @@ export default function App() {
     ));
   }
   function table(items: Candidate[]) {
-    return <div className="table-scroll"><table className="candidate-table"><thead><tr><th>Candidate</th><th>Position</th><th>Stage</th><th>Skills</th><th>Applied</th><th aria-label="Actions" /></tr></thead><tbody>{renderRows(items)}</tbody></table>{items.length === 0 && <div className="empty-list"><UsersRound size={28} /><h3>No candidates found</h3><p>Try adjusting filters or add your first applicant.</p></div>}</div>;
+    return <div className="table-scroll">
+      {items.length > 0 && <table className="candidate-table">
+        <thead><tr><th>Candidate</th><th>Position</th><th>Stage</th><th>Skills</th><th>Applied</th><th aria-label="Actions" /></tr></thead>
+        <tbody>{renderRows(items)}</tbody>
+      </table>}
+      {items.length === 0 && <div className="empty-list">
+        {connection === 'offline' ? <ShieldAlert size={29} /> : <SearchCheck size={29} />}
+        <h3>{connection === 'offline' ? 'Candidate data is unavailable' : 'No candidates found'}</h3>
+        <p>{connection === 'offline' ? 'Connect MongoDB and retry to load records.' : 'Add a candidate or adjust the filters to get started.'}</p>
+        <button className="button button-outline" onClick={connection === 'offline' ? refresh : openCreate}>
+          {connection === 'offline' ? <RefreshCw size={15} /> : <Plus size={15} />}
+          {connection === 'offline' ? 'Retry connection' : 'Add candidate'}
+        </button>
+      </div>}
+    </div>;
   }
 
   return (
@@ -262,38 +365,69 @@ export default function App() {
         <div className="brand"><span className="brand-mark"><span>H</span></span><span className="brand-name">hireline<span className="brand-dot">.</span><small>RECRUITMENT OS</small></span></div>
         <div className="nav-label">WORKSPACE</div>
         <nav aria-label="Main navigation">{VIEWS.map(item => <button key={item.id} className={'nav-link' + (view === item.id ? ' nav-active' : '')} onClick={() => navigate(item.id)}><item.icon size={18} /><span>{item.label}</span>{item.id === 'candidates' && <span className="nav-count">{stats?.total ?? '—'}</span>}</button>)}</nav>
-        <div className="sidebar-bottom"><div className="workspace-card"><span className="workspace-orb">H</span><div><strong>Hireline</strong><small>Recruitment workspace</small></div></div><div className="sidebar-caption">RECRUITMENT WORKSPACE <span>v1.0</span></div></div>
+        <div className="sidebar-bottom"><button className="sidebar-create" onClick={openCreate}><Plus size={17} /> New application <ArrowRight size={16} /></button><div className="sidebar-caption"><span>HIRELINE / ATS</span><span>v1.1</span></div></div>
       </aside>
 
       <div className="main-panel">
-        <header className="topbar"><div className="topbar-left"><button className="icon-button mobile-menu" aria-label="Open navigation" onClick={() => setMobileNav(!mobileNav)}><Menu size={21} /></button><span className="breadcrumbs">Workspace <ChevronRight size={14} /> <strong>{view === 'overview' ? 'Overview' : view === 'candidates' ? 'Candidates' : 'Pipeline'}</strong></span></div><div className="topbar-right"><div className="account"><span className="account-avatar">H</span><span>Hireline workspace</span></div></div></header>
+        <header className="topbar">
+          <div className="topbar-left">
+            <button className="icon-button mobile-menu" aria-label="Open navigation" onClick={() => setMobileNav(!mobileNav)}><Menu size={21} /></button>
+            <span className="breadcrumbs">Workspace <ChevronRight size={14} /> <strong>{view === 'overview' ? 'Overview' : view === 'candidates' ? 'Candidates' : 'Pipeline'}</strong></span>
+          </div>
+          <div className="topbar-right">
+            <button className="topbar-search" onClick={() => navigate('candidates')}><Search size={15} /><span>Find candidates</span></button>
+            <span className={'connection-status connection-' + connection} role="status">
+              <span className="connection-dot" />{connection === 'online' ? 'Connected' : connection === 'offline' ? 'Database offline' : 'Checking'}
+            </span>
+            <button className="icon-button refresh-button" aria-label="Refresh application data" title="Refresh application data" onClick={refresh}>
+              <RefreshCw size={17} className={connection === 'checking' ? 'refreshing' : ''} />
+            </button>
+          </div>
+        </header>
         <main className="content">
           <div className="page-heading"><div><div className="eyebrow">HIRELINE / WORKSPACE</div><h1>{title}</h1><p>{subtitle}</p></div><button className="button button-primary add-button" onClick={openCreate}><Plus size={17} /> Add candidate</button></div>
-          <div className="public-note"><CircleHelp size={16} /><span>Public workspace: anyone with this link can view or change records. Do not enter real candidate information without access controls.</span></div>
-          {error && <div className="global-error" role="alert"><span>{error}</span><button aria-label="Dismiss error" onClick={() => setError('')}><X size={16} /></button></div>}
+          {connection === 'offline' && <div className="connection-banner" role="alert">
+            <ShieldAlert size={20} />
+            <div><strong>Database connection unavailable</strong><span>Hireline cannot load or save applications until MongoDB Atlas is connected. The interface is online, but data actions are temporarily unavailable.</span></div>
+            <button className="button button-outline" onClick={refresh}><RefreshCw size={15} /> Retry</button>
+          </div>}
+          {error && connection !== 'offline' && <div className="global-error" role="alert"><span>{error}</span><button aria-label="Dismiss error" onClick={() => setError('')}><X size={16} /></button></div>}
 
           {view === 'overview' && <>
             <div className="metrics">
-              <div className="metric"><div className="metric-top"><span>Total candidates</span><UsersRound size={20} /></div><div className="metric-value">{stats?.total ?? '—'}<span className="metric-chip">ALL TIME</span></div><span className="metric-foot"><ArrowUpRight size={14} /> Across all open roles</span></div>
-              <div className="metric"><div className="metric-top"><span>In interviews</span><CalendarDays size={20} /></div><div className="metric-value">{counts.Interview}<span className="metric-chip">ACTIVE</span></div><span className="metric-foot"><Clock3 size={14} /> {stats?.upcoming ?? '—'} scheduled this week</span></div>
-              <div className="metric"><div className="metric-top"><span>Selected</span><Check size={20} /></div><div className="metric-value">{counts.Selected}<span className="metric-chip metric-good">HIRED</span></div><span className="metric-foot"><ArrowUpRight size={14} /> Successfully moved forward</span></div>
-              <div className="metric"><div className="metric-top"><span>Rejected</span><ArrowDownRight size={20} /></div><div className="metric-value">{counts.Rejected}<span className="metric-chip">CLOSED</span></div><span className="metric-foot"><ArrowDownRight size={14} /> Applications closed</span></div>
+              <button className="metric metric-action" onClick={() => viewStage('')} disabled={connection !== 'online'}><div className="metric-top"><span>Total candidates</span><UsersRound size={20} /></div><div className="metric-value">{stats?.total ?? '—'}<span className="metric-chip">ALL TIME</span></div><span className="metric-foot"><ArrowUpRight size={14} /> Browse all applications <ArrowRight size={14} /></span></button>
+              <button className="metric metric-action" onClick={() => viewStage('Interview')} disabled={connection !== 'online'}><div className="metric-top"><span>In interviews</span><CalendarDays size={20} /></div><div className="metric-value">{stats ? counts.Interview : '—'}<span className="metric-chip">ACTIVE</span></div><span className="metric-foot"><Clock3 size={14} /> {stats?.upcoming ?? '—'} scheduled this week <ArrowRight size={14} /></span></button>
+              <button className="metric metric-action" onClick={() => viewStage('Selected')} disabled={connection !== 'online'}><div className="metric-top"><span>Selected</span><Check size={20} /></div><div className="metric-value">{stats ? counts.Selected : '—'}<span className="metric-chip metric-good">HIRED</span></div><span className="metric-foot"><ArrowUpRight size={14} /> View selected candidates <ArrowRight size={14} /></span></button>
+              <button className="metric metric-action" onClick={() => viewStage('Rejected')} disabled={connection !== 'online'}><div className="metric-top"><span>Rejected</span><ArrowDownRight size={20} /></div><div className="metric-value">{stats ? counts.Rejected : '—'}<span className="metric-chip">CLOSED</span></div><span className="metric-foot"><ArrowDownRight size={14} /> Review closed applications <ArrowRight size={14} /></span></button>
             </div>
             <div className="overview-grid">
-              <section className="surface pipeline-summary"><div className="section-heading"><div><div className="eyebrow">PIPELINE HEALTH</div><h2>Hiring, at a glance</h2></div><button className="text-link" onClick={() => navigate('pipeline')}>View pipeline <ArrowRight size={15} /></button></div><p className="section-subtitle">Candidate distribution across your recruitment stages</p><div className="distribution-bar" role="img" aria-label="Distribution across recruitment stages">{STAGES.map(s => <div key={s} className={stageClass(s)} style={{ flexGrow: counts[s], flexBasis: counts[s] ? 0 : 0, minWidth: 0 }} />)}</div><div className="stage-stats">{STAGES.map(s => <div className="stage-stat" key={s}><span><span className={'stage-key ' + stageClass(s)} />{s}</span><strong>{counts[s]}</strong><small>{stats?.total ? Math.round(counts[s] / stats.total * 100) : 0}%</small></div>)}</div></section>
-              <section className="surface upcoming-card"><div className="section-heading"><div><div className="eyebrow">COMING UP</div><h2>Interviews</h2></div><span className="section-count">NEXT 7 DAYS</span></div><div className="upcoming-count"><strong>{stats?.upcoming ?? '—'}</strong><span>Scheduled this week</span></div><div className="upcoming-bottom"><CalendarDays size={18} /><p>Keep candidate profiles updated with interview dates to see them here.</p></div></section>
+              <section className="surface pipeline-summary"><div className="section-heading"><div><div className="eyebrow">PIPELINE HEALTH</div><h2>Hiring, at a glance</h2></div><button className="text-link" onClick={() => navigate('pipeline')}>View pipeline <ArrowRight size={15} /></button></div><p className="section-subtitle">Candidate distribution across your recruitment stages</p><div className="distribution-bar" role="img" aria-label="Distribution across recruitment stages">{STAGES.map(s => <div key={s} className={stageClass(s)} style={{ flexGrow: counts[s], flexBasis: counts[s] ? 0 : 0, minWidth: 0 }} />)}</div><div className="stage-stats">{STAGES.map(s => <button className="stage-stat" key={s} disabled={connection !== 'online'} onClick={() => viewStage(s)} aria-label={'View candidates in ' + s}><span><span className={'stage-key ' + stageClass(s)} />{s}</span><strong>{stats ? counts[s] : '—'}</strong><small>{stats?.total ? Math.round(counts[s] / stats.total * 100) + '%' : '—'}</small></button>)}</div></section>
+              <section className="surface upcoming-card"><div className="section-heading"><div><div className="eyebrow">COMING UP</div><h2>Interviews</h2></div><span className="section-count">NEXT 7 DAYS</span></div><div className="upcoming-count"><strong>{stats?.upcoming ?? '—'}</strong><span>Scheduled this week</span></div><div className="upcoming-bottom">
+                {upcoming.length > 0 ? <div className="interview-list">{upcoming.slice(0, 3).map(candidate => <button key={candidate.id} className="interview-item" onClick={() => void openProfile(candidate)}><Avatar name={candidate.name} /><span><strong>{candidate.name}</strong><small>{candidate.role} · {shortDate(candidate.interviewAt)}</small></span><ArrowUpRight size={15} /></button>)}</div> : <><CalendarDays size={18} /><p>{connection === 'offline' ? 'Upcoming interviews will appear after reconnection.' : 'Set interview dates in candidate profiles to schedule interviews.'}</p></>}
+              </div></section>
             </div>
             <section className="surface recent-section"><div className="section-heading"><div><div className="eyebrow">RECENT ACTIVITY</div><h2>Latest candidates</h2></div><button className="text-link" onClick={() => navigate('candidates')}>View all candidates <ArrowRight size={15} /></button></div>{table(recent)}</section>
           </>}
 
-          {view === 'candidates' && <section className="surface directory"><div className="directory-toolbar"><div><div className="eyebrow">CANDIDATE DATABASE</div><h2>All applications <span className="count-label">{page.total}</span></h2></div><span className="list-description">Searchable, filterable and up to date</span></div><div className="filters"><label className="search-field"><Search size={17} /><input aria-label="Search candidates" placeholder="Search name, email, role or skill…" value={search} onChange={e => setSearch(e.target.value)} /></label><label className="filter-select"><SlidersHorizontal size={16} /><select aria-label="Filter by stage" value={stage} onChange={e => setStage(e.target.value)}><option value="">All stages</option>{STAGES.map(s => <option key={s}>{s}</option>)}</select></label><label className="filter-select"><BriefcaseBusiness size={16} /><select aria-label="Filter by role" value={role} onChange={e => setRole(e.target.value)}><option value="">All roles</option>{stats?.roles.map(r => <option key={r}>{r}</option>)}</select></label><label className="filter-skill"><input aria-label="Filter by skill" placeholder="Skill..." value={skill} onChange={e => setSkill(e.target.value)} /></label>{(search || stage || role || skill) && <button className="button button-reset" onClick={() => { setSearch(''); setStage(''); setRole(''); setSkill(''); }}><FilterX size={15} /> Reset</button>}</div>{loading ? <div className="loading-state">Loading candidates…</div> : table(page.items)}<div className="pagination"><span>Showing {page.total ? (page.page - 1) * page.limit + 1 : 0}–{Math.min(page.page * page.limit, page.total)} of {page.total} applicants</span><div><button className="icon-button" aria-label="Previous page" disabled={pageNumber <= 1} onClick={() => setPageNumber(p => p - 1)}><ChevronLeft size={18} /></button><span>Page {page.page} of {page.pages}</span><button className="icon-button" aria-label="Next page" disabled={pageNumber >= page.pages} onClick={() => setPageNumber(p => p + 1)}><ChevronRight size={18} /></button></div></div></section>}
+          {view === 'candidates' && <section className="surface directory"><div className="directory-toolbar"><div><div className="eyebrow">CANDIDATE DATABASE</div><h2>All applications <span className="count-label">{page.total}</span></h2></div><button className="button button-outline export-button" onClick={() => void exportCsv()} disabled={exporting || loading || connection !== 'online' || page.total === 0}><Download size={16} /> {exporting ? 'Exporting…' : 'Export CSV'}</button></div><div className="filters"><label className="search-field"><Search size={17} /><input aria-label="Search candidates" placeholder="Search name, email, role or skill…" value={search} onChange={e => setSearch(e.target.value)} /></label><label className="filter-select"><SlidersHorizontal size={16} /><select aria-label="Filter by stage" value={stage} onChange={e => setStage(e.target.value)}><option value="">All stages</option>{STAGES.map(s => <option key={s}>{s}</option>)}</select></label><label className="filter-select"><BriefcaseBusiness size={16} /><select aria-label="Filter by role" value={role} onChange={e => setRole(e.target.value)}><option value="">All roles</option>{stats?.roles.map(r => <option key={r}>{r}</option>)}</select></label><label className="filter-skill"><input aria-label="Filter by skill" placeholder="Skill..." value={skill} onChange={e => setSkill(e.target.value)} /></label>{(search || stage || role || skill) && <button className="button button-reset" onClick={() => { setSearch(''); setStage(''); setRole(''); setSkill(''); }}><FilterX size={15} /> Reset</button>}</div>{loading ? <div className="loading-state">Loading candidates…</div> : table(connection === 'offline' ? [] : page.items)}<div className="pagination"><span>Showing {page.total ? (page.page - 1) * page.limit + 1 : 0}–{Math.min(page.page * page.limit, page.total)} of {page.total} applicants</span><div><button className="icon-button" aria-label="Previous page" disabled={pageNumber <= 1} onClick={() => setPageNumber(p => p - 1)}><ChevronLeft size={18} /></button><span>Page {page.page} of {page.pages}</span><button className="icon-button" aria-label="Next page" disabled={pageNumber >= page.pages} onClick={() => setPageNumber(p => p + 1)}><ChevronRight size={18} /></button></div></div></section>}
 
-          {view === 'pipeline' && <><div className="board-toolbar"><div className="board-hint"><KanbanSquare size={18} /> Drag cards or use the stage selector to move candidates</div><span>{board.length} candidates in pipeline</span></div>{boardLoading ? <div className="loading-state">Loading pipeline…</div> : <div className="board">{STAGES.map(s => <section className="board-column" key={s} onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); const moving = board.find(c => c.id === draggedId); if (moving) void changeStage(moving, s).catch(err => setError(err.message)); setDraggedId(''); }}><div className="column-heading"><span className={'stage-key ' + stageClass(s)} /><h3>{s}</h3><span>{board.filter(c => c.stage === s).length}</span></div><div className="board-cards">{board.filter(c => c.stage === s).map(c => <article key={c.id} className={'board-card' + (draggedId === c.id ? ' dragging' : '')} draggable onDragStart={() => setDraggedId(c.id)} onDragEnd={() => setDraggedId('')}><button className="board-person" onClick={() => void openProfile(c)}><Avatar name={c.name} /><span><strong>{c.name}</strong><small>{c.role}</small></span><ArrowUpRight size={15} /></button><div className="board-skills">{c.skills.slice(0, 2).map(skill => <span className="skill" key={skill}>{skill}</span>)}</div><div className="board-card-bottom"><span><Clock3 size={13} /> {shortDate(c.updatedAt)}</span><select aria-label={'Move ' + c.name + ' to stage'} value={c.stage} onChange={e => void changeStage(c, e.target.value as Stage).catch(err => setError(err.message))}>{STAGES.map(option => <option key={option}>{option}</option>)}</select></div></article>)}{board.filter(c => c.stage === s).length === 0 && <div className="empty-column">Drop candidates here</div>}</div></section>)}</div>}</>}
-          <footer className="footer"><span>HIRELINE / BUILT FOR BETTER HIRING</span><span>Applicant Tracking System · MERN Stack</span></footer>
+          {view === 'pipeline' && <><div className="board-toolbar"><div className="board-hint"><KanbanSquare size={18} /> Drag cards or use the stage selector to move candidates</div><span>{connection === 'offline' ? 'Data unavailable' : board.length + ' candidates in pipeline'}</span></div>{connection === 'offline' ? <div className="surface board-unavailable"><ShieldAlert size={27} /><h3>Pipeline unavailable</h3><p>Reconnect MongoDB to load the hiring stages.</p><button className="button button-primary" onClick={refresh}><RefreshCw size={16} /> Retry connection</button></div> : boardLoading ? <div className="loading-state">Loading pipeline…</div> : <div className="board">{STAGES.map(s => <section className="board-column" key={s} onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); const moving = board.find(c => c.id === draggedId); if (moving) void changeStage(moving, s).catch(err => setError(err.message)); setDraggedId(''); }}><div className="column-heading"><span className={'stage-key ' + stageClass(s)} /><h3>{s}</h3><span>{board.filter(c => c.stage === s).length}</span></div><div className="board-cards">{board.filter(c => c.stage === s).map(c => <article key={c.id} className={'board-card' + (draggedId === c.id ? ' dragging' : '')} draggable onDragStart={() => setDraggedId(c.id)} onDragEnd={() => setDraggedId('')}><button className="board-person" onClick={() => void openProfile(c)}><Avatar name={c.name} /><span><strong>{c.name}</strong><small>{c.role}</small></span><ArrowUpRight size={15} /></button><div className="board-skills">{c.skills.slice(0, 2).map(skill => <span className="skill" key={skill}>{skill}</span>)}</div><div className="board-card-bottom"><span><Clock3 size={13} /> {shortDate(c.updatedAt)}</span><select aria-label={'Move ' + c.name + ' to stage'} value={c.stage} onChange={e => void changeStage(c, e.target.value as Stage).catch(err => setError(err.message))}>{STAGES.map(option => <option key={option}>{option}</option>)}</select></div></article>)}{board.filter(c => c.stage === s).length === 0 && <div className="empty-column">Drop candidates here</div>}</div></section>)}</div>}</>}
+          <footer className="footer"><span>HIRELINE / APPLICANT TRACKING</span><span>Public workspace · No sign-in · Use test records only</span></footer>
         </main>
       </div>
       {mobileNav && <button className="mobile-scrim" aria-label="Close navigation" onClick={() => setMobileNav(false)} />}
-      {selected && <ProfileDrawer key={selected.id} candidate={selected} onClose={() => setSelected(null)} onEdit={openEdit} onStage={changeStage} onNote={addNote} onDelete={removeCandidate} />}
+      {selected && <ProfileDrawer key={selected.id} candidate={selected} onClose={() => setSelected(null)} onEdit={openEdit} onStage={changeStage} onNote={addNote} onDelete={candidate => setPendingDelete(candidate)} />}
+      {pendingDelete && <div className="overlay" role="presentation">
+        <section className="confirm-dialog" role="alertdialog" aria-modal="true" aria-label="Confirm candidate deletion" aria-describedby="delete-description">
+          <div className="confirm-icon"><Trash2 size={23} /></div>
+          <h2>Delete this candidate?</h2>
+          <p id="delete-description"><strong>{pendingDelete.name}</strong> and their notes and stage history will be permanently removed. This action cannot be undone.</p>
+          <div className="confirm-actions">
+            <button className="button button-outline" disabled={deleting} onClick={() => setPendingDelete(null)}>Keep candidate</button>
+            <button className="button button-danger" disabled={deleting} onClick={() => void removeCandidate(pendingDelete)}><Trash2 size={15} />{deleting ? 'Deleting…' : 'Delete candidate'}</button>
+          </div>
+        </section>
+      </div>}
       {modalOpen && <CandidateFormModal key={editing?.id || 'new'} editing={editing} onClose={() => { setModalOpen(false); setEditing(null); }} onSave={saveCandidate} />}
     </div>
   );

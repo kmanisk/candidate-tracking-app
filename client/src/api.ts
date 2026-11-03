@@ -20,7 +20,9 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  health: () => request<{ status: string }>('/health'),
   stats: () => request<Stats>('/stats'),
+  upcoming: () => request<{ items: Candidate[] }>('/interviews/upcoming'),
   list: (params: URLSearchParams) => request<Page>('/candidates?' + params),
   get: (id: string) => request<Candidate>('/candidates/' + id),
   create: (data: CandidateInput) => request<Candidate>('/candidates', { method: 'POST', body: JSON.stringify(data) }),
